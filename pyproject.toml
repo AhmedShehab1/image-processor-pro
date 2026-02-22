@@ -1,0 +1,16 @@
+[project]
+name = "image-processor-pro"
+version = "0.1.0"
+description = "Biomedical Engineering Image Processing Task"
+dependencies = [
+    "opencv-python-headless>=4.8.0",
+    "numpy<2.0.0",
+    "pyqt6>=6.6.0",
+    "matplotlib>=3.8.0",
+    "scipy>=1.11.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0.0", # For Omar to test his logic
+]
