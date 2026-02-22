@@ -2,6 +2,11 @@
 name = "image-processor-pro"
 version = "0.1.0"
 description = "Biomedical Engineering Image Processing Task"
+authors = [
+    { name = "Ahmed Shehab" }
+]
+requires-python = ">=3.12"
+
 dependencies = [
     "opencv-python-headless>=4.8.0",
     "numpy<2.0.0",
@@ -10,7 +15,7 @@ dependencies = [
     "scipy>=1.11.0",
 ]
 
-[tool.uv]
-dev-dependencies = [
-    "pytest>=7.0.0", # For Omar to test his logic
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
 ]
