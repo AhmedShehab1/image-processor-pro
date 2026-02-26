@@ -1,82 +1,173 @@
-/* Global Background and Text */
-QMainWindow, QWidget {
-    background-color: #1E1E1E;
-    color: #D4D4D4;
-    font-family: "Segoe UI", Arial, sans-serif;
+/* ========================================================
+   GLOBAL THEME
+   Deep dark background, light text, modern sans-serif
+======================================================== */
+* {
+    font-family: "Segoe UI", "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
     font-size: 13px;
+    color: #D1D5DB; /* Soft light gray for readability */
 }
 
-/* Sidebar and Panels */
+QMainWindow, QWidget {
+    background-color: #18181B; /* Deepest background (Canvas area) */
+}
+
+/* ========================================================
+   SIDEBAR & ACCORDION (QToolBox)
+======================================================== */
+/* The sidebar container background */
+SidebarControls {
+    background-color: #27272A; 
+    border-right: 1px solid #3F3F46;
+}
+
 QToolBox {
-    background-color: #252526;
+    background-color: #27272A;
 }
 
+/* Fix the Clipping: The Tabs themselves */
 QToolBox::tab {
-    background-color: #333333;
-    color: #CCCCCC;
-    border-radius: 4px;
-    padding: 8px;
-    font-weight: bold;
+    background-color: #27272A;
+    color: #A1A1AA;
+    min-height: 35px;         /* Forces the tab to be tall enough! */
+    padding-left: 10px;       /* Pushes text away from the edge */
+    border-bottom: 1px solid #3F3F46;
+    font-weight: 600;
 }
 
+/* When the accordion is open */
 QToolBox::tab:selected {
-    background-color: #007ACC; /* Professional Cyan Accent */
-    color: white;
+    color: #38BDF8;           /* Mockup Cyan */
+    background-color: #18181B;
+    border-left: 3px solid #38BDF8; /* Subtle highlight indicator */
 }
 
-/* Inputs and Dropdowns */
-QComboBox, QPushButton {
-    background-color: #3C3C3C;
-    border: 1px solid #555555;
-    border-radius: 4px;
+/* The content area inside the open accordion */
+QToolBox QWidget {
+    background-color: #18181B;
     padding: 5px;
-    color: #FFFFFF;
 }
 
-QComboBox:hover, QPushButton:hover {
-    background-color: #505050;
-    border: 1px solid #007ACC;
+/* ========================================================
+   INPUTS (Sliders, Dropdowns, Radio Buttons)
+======================================================== */
+QLabel {
+    color: #A1A1AA;
+    font-size: 11px;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-top: 5px;
 }
 
-/* Custom Primary Button (The 'Process' Button) */
-QPushButton#process_btn {
-    background-color: #007ACC;
-    font-weight: bold;
-    font-size: 14px;
-}
-QPushButton#process_btn:hover {
-    background-color: #0098FF;
+QComboBox {
+    background-color: #27272A;
+    border: 1px solid #3F3F46;
+    border-radius: 4px;
+    padding: 6px 10px;
+    color: #F4F4F5;
 }
 
-/* Sliders */
+QComboBox:hover {
+    border: 1px solid #38BDF8;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+
+/* Sliders to match the mockup */
 QSlider::groove:horizontal {
-    border: 1px solid #333333;
-    height: 6px;
-    background: #2D2D30;
-    margin: 2px 0;
-    border-radius: 3px;
+    border: none;
+    height: 4px;
+    background: #3F3F46;
+    border-radius: 2px;
+    margin: 10px 0;
+}
+
+QSlider::sub-page:horizontal {
+    background: #38BDF8; /* The filled part of the slider */
+    border-radius: 2px;
 }
 
 QSlider::handle:horizontal {
-    background: #007ACC;
-    border: 1px solid #007ACC;
+    background: #38BDF8;
     width: 14px;
-    margin: -4px 0; 
+    height: 14px;
+    margin: -5px 0; /* Centers the handle vertically on the track */
     border-radius: 7px;
 }
 
 QSlider::handle:horizontal:hover {
-    background: #0098FF;
+    background: #7DD3FC;
+    transform: scale(1.1);
 }
 
 /* Radio Buttons */
+QRadioButton {
+    color: #D1D5DB;
+    spacing: 8px;
+    text-transform: none; /* Override the label uppercase */
+    font-size: 13px;
+}
+
 QRadioButton::indicator {
     width: 14px;
     height: 14px;
     border-radius: 7px;
-    border: 2px solid #555555;
+    border: 2px solid #52525B;
+    background: transparent;
 }
+
 QRadioButton::indicator:checked {
-    background-color: #007ACC;
-    border: 2px solid #007ACC;
+    border: 4px solid #38BDF8; /* Creates the filled dot effect */
+    background: #18181B;
+}
+
+/* ========================================================
+   BUTTONS & SPECIFIC ELEMENTS
+======================================================== */
+/* The main action button targeted by its Object Name */
+QPushButton#process_btn {
+    background-color: #38BDF8;
+    color: #0F172A; /* Dark text on bright button */
+    font-weight: bold;
+    font-size: 14px;
+    border-radius: 6px;
+    padding: 10px;
+    border: none;
+}
+
+QPushButton#process_btn:hover {
+    background-color: #7DD3FC;
+}
+
+QPushButton#process_btn:disabled {
+    background-color: #3F3F46;
+    color: #71717A;
+}
+
+/* Standard Buttons (Load, Reset, Enhance) */
+QPushButton {
+    background-color: #27272A;
+    border: 1px solid #3F3F46;
+    color: #F4F4F5;
+    border-radius: 4px;
+    padding: 6px 12px;
+}
+
+QPushButton:hover {
+    background-color: #3F3F46;
+    border: 1px solid #38BDF8;
+}
+
+/* The Canvas Placeholders */
+QLabel#canvas_placeholder {
+    border: 2px dashed #3F3F46;
+    background-color: #18181B;
+    border-radius: 8px;
+    color: #71717A;
+    font-size: 16px;
+    font-weight: 400;
+    text-transform: none;
 }

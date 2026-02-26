@@ -44,7 +44,7 @@ class CanvasView(QWidget):
         single_layout = QVBoxLayout(self.single_page)
         self.single_label = QLabel("No Image Loaded")
         self.single_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.single_label.setStyleSheet("border: 2px dashed #333333; background-color: #1E1E1E;")
+        self.single_label.setObjectName("canvas_placeholder")
         single_layout.addWidget(self.single_label)
         self.single_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         self.single_label.setMinimumSize(1, 1)
@@ -76,11 +76,11 @@ class CanvasView(QWidget):
         title_lbl.setStyleSheet("color: #007ACC; font-weight: bold;")
         img_lbl = QLabel()
         img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        img_lbl.setStyleSheet("border: 1px solid #333333; background-color: #1E1E1E;")
+        img_lbl.setObjectName("canvas_placeholder")
         
         img_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         img_lbl.setMinimumSize(1, 1)
-        
+
         lay.addWidget(title_lbl)
         lay.addWidget(img_lbl, stretch=1)
         # Attach the image label to the container so we can access it later

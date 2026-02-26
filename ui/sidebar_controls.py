@@ -36,7 +36,7 @@ class SidebarControls(QWidget):
         # Global Process Button
         self.process_btn = QPushButton("▶ Process Image")
         self.process_btn.setMinimumHeight(40)
-        self.process_btn.setStyleSheet("font-weight: bold; background-color: #2D8CFF; color: white;")
+        self.process_btn.setObjectName("process_btn")
         self.process_btn.clicked.connect(self._emit_process_signal)
         self.layout.addWidget(self.process_btn)
 
