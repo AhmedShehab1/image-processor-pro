@@ -6,6 +6,7 @@ from ui.sidebar_controls import SidebarControls
 from ui.canvas_view import CanvasView
 from ui.histogram_panel import HistogramPanel
 from workers.thread_workers import ImageWorker
+from config import AppConfig
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -16,7 +17,14 @@ class MainWindow(QMainWindow):
         # Application State
         self.base_image = None     # The unmodified image loaded from disk
         self.current_image = None  # The currently displayed image state
+        self.current_multi_buffer = None  # Holds multi-buffer outputs for edge detection, etc.
+        self.last_action = None   # A string hint of the last operation performed (for undo/redo context)
         self.worker = None         # Holds the background QThread
+
+
+        self.history_stack = []
+        self.redo_stack = []
+        self.MAX_HISTORY = AppConfig.MAX_HISTORY
 
         self._setup_ui()
         self._connect_signals()
@@ -51,12 +59,21 @@ class MainWindow(QMainWindow):
         # 2. Listen for a new image being loaded in the Canvas
         self.canvas.image_loaded.connect(self.on_image_loaded)
 
+        self.canvas.undo_requested.connect(self.perform_undo)
+        self.canvas.redo_requested.connect(self.perform_redo)
+
     # --- State Management ---
 
     def on_image_loaded(self, image: np.ndarray):
         """Called whenever the user loads a file or clicks 'Reset'."""
         self.base_image = image.copy()
         self.current_image = image.copy()
+        self.current_multi_buffer = None  # Clear any previous multi-buffer state
+        
+        self.history_stack.clear()
+        self.redo_stack.clear()
+        self._update_undo_redo_buttons()
+        
         self.histogram.update_plots(self.current_image)
 
     # --- Worker Thread Execution ---
@@ -82,17 +99,87 @@ class MainWindow(QMainWindow):
     def on_worker_finished(self, response: dict):
         """Routes the worker's output dictionary to the correct canvas layout."""
         # Unlock the UI
-        self.sidebar.process_btn.setEnabled(True)
-        self.sidebar.process_btn.setText("▶ Process Image")
+        if self.current_image is not None:
+            self.history_stack.append({
+                "image": self.current_image.copy(),
+                "multi_buffer": self.current_multi_buffer.copy() if self.current_multi_buffer else None,
+                "action": self.last_action
+            })
+
+            if len(self.history_stack) > self.MAX_HISTORY:
+                self.history_stack.pop(0)
+            
+            self.redo_stack.clear()  # Clear the redo stack on new action
 
         action = response.get("action", "Unknown")
         data = response.get("data")
+        self.last_action = action  # Store the last action for undo/redo context
 
         # --- Route by Data Structure, NOT by Magic Strings ---
         
         # Scenario A: We received a multi-buffer dictionary
         if isinstance(data, dict):
-            # Verify it has the expected keys for a 4-grid layout
+
+            self.current_image = data["magnitude"] if "magnitude" in data else self.current_image
+            self.current_multi_buffer = data
+        
+        # Scenario B: We received a standard image array
+        elif isinstance(data, np.ndarray):
+            self.current_image = data
+            self.current_multi_buffer = None
+            
+        # Scenario C: Something went terribly wrong
+        else:
+            print(f"Error: Unrecognized data type {type(data)} from {action}")
+
+        
+        self._render_current_state()
+        self.sidebar.process_btn.setEnabled(True)
+        self.sidebar.process_btn.setText("▶ Process Image")
+        # Update the analytics drawer
+        if self.current_image is not None:
+            self.histogram.update_plots(self.current_image)
+
+    def perform_undo(self):
+        if not self.history_stack: return
+        
+        # 1. Save CURRENT state to Redo stack
+        self.redo_stack.append({
+            "image": self.current_image.copy(),
+            "multi_buffer": self.current_multi_buffer.copy() if self.current_multi_buffer is not None else None,
+            "action": self.last_action
+        })
+        
+        # 2. Pop PREVIOUS state from History
+        prev_state = self.history_stack.pop()
+        self.current_image = prev_state["image"]
+        self.current_multi_buffer = prev_state["multi_buffer"]
+        self.last_action = prev_state["action"]
+        
+        self._render_current_state()
+
+    def perform_redo(self):
+        if not self.redo_stack: return
+        
+        # 1. Save CURRENT state to History stack
+        self.history_stack.append({
+            "image": self.current_image.copy(),
+            "multi_buffer": self.current_multi_buffer,
+            "action": self.last_action
+        })
+        
+        # 2. Pop NEXT state from Redo
+        next_state = self.redo_stack.pop()
+        self.current_image = next_state["image"]
+        self.current_multi_buffer = next_state["multi_buffer"]
+        self.last_action = next_state["action"]
+        
+        self._render_current_state()
+    
+    def _render_current_state(self):
+        """Routes the current memory state to the correct Canvas view."""
+        if self.current_multi_buffer is not None:
+            data = self.current_multi_buffer
             if {"x", "y", "magnitude"}.issubset(data.keys()):
                 self.canvas.display_edge_grid(
                     original=self.base_image,
@@ -100,23 +187,16 @@ class MainWindow(QMainWindow):
                     y_img=data["y"],
                     mag_img=data["magnitude"]
                 )
-                self.current_image = data["magnitude"]
-            else:
-                # Fallback if it's a dict but missing keys
-                print(f"Warning: Malformed dictionary from {action}")
-        
-        # Scenario B: We received a standard image array
-        elif isinstance(data, np.ndarray):
-            self.canvas.display_single_image(data)
-            self.current_image = data
-            
-        # Scenario C: Something went terribly wrong
         else:
-            print(f"Error: Unrecognized data type {type(data)} from {action}")
+            self.canvas.display_single_image(self.current_image)
+            
+        self.histogram.update_plots(self.current_image)
+        self._update_undo_redo_buttons()
 
-        # Update the analytics drawer
-        if self.current_image is not None:
-            self.histogram.update_plots(self.current_image)
+    def _update_undo_redo_buttons(self):
+        """Dynamically disables buttons if there is no history to prevent crashes."""
+        self.canvas.undo_btn.setEnabled(len(self.history_stack) > 0)
+        self.canvas.redo_btn.setEnabled(len(self.redo_stack) > 0)
 
     def on_worker_error(self, error_msg: str):
         """Handles backend math crashes gracefully without bringing down the app."""

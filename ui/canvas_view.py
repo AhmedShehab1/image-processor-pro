@@ -9,6 +9,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 class CanvasView(QWidget):
     # Emit a signal when a new image is loaded so the MainWindow knows to update the Histogram
     image_loaded = pyqtSignal(np.ndarray)
+    undo_requested = pyqtSignal()  # For future undo functionality
+    redo_requested = pyqtSignal()  # For future redo functionality
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -27,9 +29,21 @@ class CanvasView(QWidget):
         
         self.reset_btn = QPushButton("⏪ Reset to Original")
         self.reset_btn.clicked.connect(self.reset_image)
+
+        # --- ADD UNDO / REDO BUTTONS ---
+        self.undo_btn = QPushButton("↩ Undo")
+        self.redo_btn = QPushButton("↪ Redo")
+        self.undo_btn.setEnabled(False)  # Initially disabled until we have history
+        self.redo_btn.setEnabled(False)  # Initially disabled until we have history
+
+        self.undo_btn.clicked.connect(self.undo_requested.emit)
+        self.redo_btn.clicked.connect(self.redo_requested.emit)
         
+
         toolbar.addWidget(self.load_btn)
         toolbar.addWidget(self.reset_btn)
+        toolbar.addWidget(self.undo_btn)
+        toolbar.addWidget(self.redo_btn)
         toolbar.addStretch()
         main_layout.addLayout(toolbar)
 
