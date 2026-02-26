@@ -51,7 +51,7 @@ class SidebarControls(QWidget):
         lay.addWidget(self.noise_dropdown)
 
         lay.addWidget(QLabel("Intensity / Probability:"))
-        self.noise_slider = QSlider(Qt.Horizontal)
+        self.noise_slider = QSlider(Qt.Orientation.Horizontal)
         self.noise_slider.setRange(0, 100)
         self.noise_slider.setValue(25)
         lay.addWidget(self.noise_slider)
@@ -83,16 +83,16 @@ class SidebarControls(QWidget):
             btn.toggled.connect(self._update_spatial_step)
 
         lay.addWidget(QLabel("Kernel Size (3, 5, 7):"))
-        self.kernel_slider = QSlider(Qt.Horizontal)
+        self.kernel_slider = QSlider(Qt.Orientation.Horizontal)
         self.kernel_slider.setRange(1, 3)  # Maps to 3, 5, 7
-        self.kernel_slider.setTickPosition(QSlider.TicksBelow)
+        self.kernel_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.kernel_slider.setTickInterval(1)
         self.kernel_slider.setValue(1)
         self.kernel_slider.valueChanged.connect(self._update_spatial_step)
         lay.addWidget(self.kernel_slider)
 
         lay.addWidget(QLabel("Sigma (For Gaussian):"))
-        self.sigma_slider = QSlider(Qt.Horizontal)
+        self.sigma_slider = QSlider(Qt.Orientation.Horizontal)
         self.sigma_slider.setRange(1, 50)  # Divide by 10 later for float
         self.sigma_slider.setValue(12)
         self.sigma_slider.valueChanged.connect(self._update_spatial_step)
@@ -127,14 +127,14 @@ class SidebarControls(QWidget):
         canny_lay.setContentsMargins(0,0,0,0)
         
         canny_lay.addWidget(QLabel("Canny Min Threshold:"))
-        self.canny_min = QSlider(Qt.Horizontal)
+        self.canny_min = QSlider(Qt.Orientation.Horizontal)
         self.canny_min.setRange(0, 255)
         self.canny_min.setValue(100)
         self.canny_min.valueChanged.connect(self._update_edge_step)
         canny_lay.addWidget(self.canny_min)
 
         canny_lay.addWidget(QLabel("Canny Max Threshold:"))
-        self.canny_max = QSlider(Qt.Horizontal)
+        self.canny_max = QSlider(Qt.Orientation.Horizontal)
         self.canny_max.setRange(0, 255)
         self.canny_max.setValue(200)
         self.canny_max.valueChanged.connect(self._update_edge_step)
@@ -176,7 +176,7 @@ class SidebarControls(QWidget):
         lay.addWidget(self.freq_dropdown)
 
         lay.addWidget(QLabel("Cutoff Radius (D0):"))
-        self.freq_slider = QSlider(Qt.Horizontal)
+        self.freq_slider = QSlider(Qt.Orientation.Horizontal)
         self.freq_slider.setRange(1, 200)
         self.freq_slider.setValue(50)
         self.freq_slider.valueChanged.connect(self._update_frequency_step)
