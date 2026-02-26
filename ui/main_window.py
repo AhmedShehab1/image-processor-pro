@@ -85,29 +85,38 @@ class MainWindow(QMainWindow):
         self.sidebar.process_btn.setEnabled(True)
         self.sidebar.process_btn.setText("▶ Process Image")
 
-        action = response.get("action")
+        action = response.get("action", "Unknown")
         data = response.get("data")
 
-        # Python 3.10+ Pattern Matching
-        match action:
-            case "SobelEdge" | "PrewittEdge" | "RobertsEdge":
-                if isinstance(data, dict):
-                # These operations return a Multi-Buffer Dictionary
-                    self.canvas.display_edge_grid(
-                        original=self.base_image,
-                        x_img=data["x"],
-                        y_img=data["y"],
-                        mag_img=data["magnitude"]
-                    )
-                    self.current_image = data["magnitude"]
-
-            case _:
-                # Standard operations ("None", "GaussianNoise", "CannyEdge") return ndarrays
-                self.canvas.display_single_image(data)
-                self.current_image = data
+        # --- Route by Data Structure, NOT by Magic Strings ---
+        
+        # Scenario A: We received a multi-buffer dictionary
+        if isinstance(data, dict):
+            # Verify it has the expected keys for a 4-grid layout
+            if {"x", "y", "magnitude"}.issubset(data.keys()):
+                self.canvas.display_edge_grid(
+                    original=self.base_image,
+                    x_img=data["x"],
+                    y_img=data["y"],
+                    mag_img=data["magnitude"]
+                )
+                self.current_image = data["magnitude"]
+            else:
+                # Fallback if it's a dict but missing keys
+                print(f"Warning: Malformed dictionary from {action}")
+        
+        # Scenario B: We received a standard image array
+        elif isinstance(data, np.ndarray):
+            self.canvas.display_single_image(data)
+            self.current_image = data
+            
+        # Scenario C: Something went terribly wrong
+        else:
+            print(f"Error: Unrecognized data type {type(data)} from {action}")
 
         # Update the analytics drawer
-        self.histogram.update_plots(self.current_image)
+        if self.current_image is not None:
+            self.histogram.update_plots(self.current_image)
 
     def on_worker_error(self, error_msg: str):
         """Handles backend math crashes gracefully without bringing down the app."""
