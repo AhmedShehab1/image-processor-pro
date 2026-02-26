@@ -1,0 +1,82 @@
+/* Global Background and Text */
+QMainWindow, QWidget {
+    background-color: #1E1E1E;
+    color: #D4D4D4;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 13px;
+}
+
+/* Sidebar and Panels */
+QToolBox {
+    background-color: #252526;
+}
+
+QToolBox::tab {
+    background-color: #333333;
+    color: #CCCCCC;
+    border-radius: 4px;
+    padding: 8px;
+    font-weight: bold;
+}
+
+QToolBox::tab:selected {
+    background-color: #007ACC; /* Professional Cyan Accent */
+    color: white;
+}
+
+/* Inputs and Dropdowns */
+QComboBox, QPushButton {
+    background-color: #3C3C3C;
+    border: 1px solid #555555;
+    border-radius: 4px;
+    padding: 5px;
+    color: #FFFFFF;
+}
+
+QComboBox:hover, QPushButton:hover {
+    background-color: #505050;
+    border: 1px solid #007ACC;
+}
+
+/* Custom Primary Button (The 'Process' Button) */
+QPushButton#process_btn {
+    background-color: #007ACC;
+    font-weight: bold;
+    font-size: 14px;
+}
+QPushButton#process_btn:hover {
+    background-color: #0098FF;
+}
+
+/* Sliders */
+QSlider::groove:horizontal {
+    border: 1px solid #333333;
+    height: 6px;
+    background: #2D2D30;
+    margin: 2px 0;
+    border-radius: 3px;
+}
+
+QSlider::handle:horizontal {
+    background: #007ACC;
+    border: 1px solid #007ACC;
+    width: 14px;
+    margin: -4px 0; 
+    border-radius: 7px;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #0098FF;
+}
+
+/* Radio Buttons */
+QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 7px;
+    border: 2px solid #555555;
+}
+QRadioButton::indicator:checked {
+    background-color: #007ACC;
+    border: 2px solid #007ACC;
+}
