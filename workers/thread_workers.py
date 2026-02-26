@@ -1,7 +1,7 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 import numpy as np
 from core.operation_factory import build_operation
-
+from core.operations import MultiOutputOperation
 class ImageWorker(QThread):
     result_ready = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
@@ -25,8 +25,8 @@ class ImageWorker(QThread):
                 operation_instance = build_operation(config)
 
                 # 2. Apply the mathematical logic
-                if hasattr(operation_instance, "apply_full"):
-                    result_dict = operation_instance.apply_full(current_image)
+                if isinstance(operation_instance, MultiOutputOperation):
+                    result_dict = operation_instance.apply_extended(current_image)
                     final_multi_buffer = result_dict
                     current_image = result_dict["magnitude"]
                 else:
