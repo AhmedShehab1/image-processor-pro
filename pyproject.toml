@@ -13,6 +13,7 @@ dependencies = [
     "pyqt6>=6.6.0",
     "matplotlib>=3.8.0",
     "scipy>=1.11.0",
+    "dotenv>=0.9.9",
 ]
 
 [dependency-groups]
