@@ -1,12 +1,19 @@
+import cv2
+import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QSlider, QComboBox, QLabel,
-    QRadioButton, QButtonGroup, QToolBox, QHBoxLayout
+    QRadioButton, QButtonGroup, QToolBox, QHBoxLayout, QFileDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from core.config_models import NoiseConfig, SpatialConfig, EdgeConfig, FrequencyConfig, EnhancementConfig
+from core.config_models import (
+    NoiseConfig, SpatialConfig, EdgeConfig, FrequencyConfig,
+    EnhancementConfig, ColorToGrayConfig
+)
 
 class SidebarControls(QWidget):
     process_requested = pyqtSignal(list)  # Emits the full recipe (list of steps)
+    hybrid_image_loaded = pyqtSignal(np.ndarray)  # Emits the second image for hybrid
+    section_changed = pyqtSignal(str)  # Emits the section title when user switches
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -19,11 +26,13 @@ class SidebarControls(QWidget):
             "spatial": None,
             "edge": None,
             "frequency": None,
-            "enhancement": None
+            "enhancement": None,
+            "color": None
         }
 
         # Main Accordion Widget
         self.toolbox = QToolBox()
+        self.toolbox.currentChanged.connect(self._on_section_changed)
         self.layout.addWidget(self.toolbox)
 
         # Build individual accordion sections
@@ -32,6 +41,8 @@ class SidebarControls(QWidget):
         self._build_edge_section()
         self._build_frequency_section()
         self._build_enhancement_section()
+        self._build_color_section()
+        self._build_hybrid_section()
 
         # Global Process Button
         self.process_btn = QPushButton("▶ Process Image")
@@ -39,6 +50,11 @@ class SidebarControls(QWidget):
         self.process_btn.setObjectName("process_btn")
         self.process_btn.clicked.connect(self._emit_process_signal)
         self.layout.addWidget(self.process_btn)
+
+    def _on_section_changed(self, index: int):
+        """Emit the section title so MainWindow can switch canvas pages."""
+        title = self.toolbox.itemText(index)
+        self.section_changed.emit(title)
 
     # --- 1. Noise Injection ---
     def _build_noise_section(self):
@@ -214,13 +230,64 @@ class SidebarControls(QWidget):
 
     def _add_normalize_step(self):
         self.pipeline_state["enhancement"] = EnhancementConfig(action_type="Normalize")
-    
+
+    # --- 6. Color Conversion ---
+    def _build_color_section(self):
+        widget = QWidget()
+        lay = QVBoxLayout(widget)
+
+        self.gray_btn = QPushButton("Convert to Grayscale")
+        self.gray_btn.clicked.connect(self._add_gray_step)
+        lay.addWidget(self.gray_btn)
+
+        lay.addStretch()
+        self.toolbox.addItem(widget, "6. Color Conversion")
+
+    def _add_gray_step(self):
+        self.pipeline_state["color"] = ColorToGrayConfig(method="Manual")
+
+    # --- 7. Hybrid Images ---
+    def _build_hybrid_section(self):
+        """Sidebar only needs a Load button — sliders live in the Canvas."""
+        widget = QWidget()
+        lay = QVBoxLayout(widget)
+        lay.setSpacing(8)
+        lay.setContentsMargins(4, 4, 4, 4)
+
+        info_label = QLabel("Load a second image to enter\nhybrid mode. Sliders are on\nthe canvas.")
+        info_label.setStyleSheet("color: #888; font-style: italic;")
+        info_label.setWordWrap(True)
+        lay.addWidget(info_label)
+
+        self.hybrid_load_btn = QPushButton("📂 Load Second Image")
+        self.hybrid_load_btn.clicked.connect(self._load_second_image)
+        lay.addWidget(self.hybrid_load_btn)
+
+        self.hybrid_status_label = QLabel("No second image loaded")
+        self.hybrid_status_label.setStyleSheet("color: #888;")
+        self.hybrid_status_label.setWordWrap(True)
+        lay.addWidget(self.hybrid_status_label)
+
+        lay.addStretch()
+        self.toolbox.addItem(widget, "7. Hybrid Images")
+
+    def _load_second_image(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Second Image", "", "Images (*.png *.jpg *.jpeg *.bmp)"
+        )
+        if file_path:
+            img = cv2.imread(file_path, cv2.IMREAD_COLOR)
+            if img is not None:
+                filename = file_path.replace("\\", "/").split("/")[-1]
+                self.hybrid_status_label.setText(f"✔ {filename}")
+                self.hybrid_status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+                self.hybrid_image_loaded.emit(img)
 
     # --- Communication Logic ---
     def _emit_process_signal(self):
         # Only emit steps that are actually configured
         recipe = []
-        processing_order = ["enhancement", "noise", "spatial", "frequency", "edge", ]
+        processing_order = ["color", "enhancement", "noise", "spatial", "frequency", "edge"]
 
         for stage in processing_order:
             config = self.pipeline_state.get(stage)

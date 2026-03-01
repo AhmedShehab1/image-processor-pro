@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
+import numpy as np
 
 @dataclass
 class OperationConfig:
@@ -32,3 +33,13 @@ class FrequencyConfig(OperationConfig):
 @dataclass
 class EnhancementConfig(OperationConfig):
     action_type: str  # "Equalize" or "Normalize"
+
+@dataclass
+class ColorToGrayConfig(OperationConfig):
+    method: str  # "Manual"
+
+@dataclass
+class HybridConfig(OperationConfig):
+    sigma_low: float
+    sigma_high: float
+    second_image: np.ndarray = field(default=None, repr=False)

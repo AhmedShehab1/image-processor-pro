@@ -54,5 +54,13 @@ def build_operation(config: OperationConfig) -> ImageOperation:
         case EnhancementConfig(action_type="Normalize"):
             return NormalizeImage()
 
+        # --- Color Conversion Routing ---
+        case ColorToGrayConfig(method="Manual"):
+            return ManualGrayscale()
+
+        # --- Hybrid Image Routing ---
+        case HybridConfig(sigma_low=sl, sigma_high=sh, second_image=img2):
+            return HybridImageOperation(sigma_low=sl, sigma_high=sh, second_image=img2)
+
         case _:
             raise ValueError(f"Factory cannot map unknown config: {type(config)}")

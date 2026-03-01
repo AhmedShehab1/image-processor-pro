@@ -62,6 +62,26 @@ class MainWindow(QMainWindow):
         self.canvas.undo_requested.connect(self.perform_undo)
         self.canvas.redo_requested.connect(self.perform_redo)
 
+        # 3. Hybrid images — sidebar loads Image B, canvas does real-time preview
+        self.sidebar.hybrid_image_loaded.connect(self.on_hybrid_image_loaded)
+        self.canvas.hybrid_result_ready.connect(self.on_hybrid_result)
+
+        # 4. Sidebar section switching — controls which canvas page is visible
+        self.sidebar.section_changed.connect(self.handle_section_change)
+
+    # --- Page Switching ---
+
+    def handle_section_change(self, section_title: str):
+        """
+        Route the canvas to the correct page when the user clicks
+        a different sidebar section.
+        """
+        if "Hybrid" in section_title:
+            self.canvas.show_hybrid_page()
+        else:
+            self.canvas.show_single_page()
+            self.canvas.clear_hybrid_state()
+
     # --- State Management ---
 
     def on_image_loaded(self, image: np.ndarray):
@@ -76,12 +96,30 @@ class MainWindow(QMainWindow):
         
         self.histogram.update_plots(self.current_image)
 
+    def on_hybrid_image_loaded(self, second_image: np.ndarray):
+        """Called when the sidebar loads a second image for hybrid mode."""
+        if self.base_image is None:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "No Image", "Please load a primary image first!")
+            return
+        self.canvas.display_hybrid(self.base_image, second_image)
+
+    def on_hybrid_result(self, result: np.ndarray):
+        """Called when the canvas updates the hybrid preview in real-time."""
+        self.current_image = result
+        self.histogram.update_plots(result)
+
     # --- Worker Thread Execution ---
 
     def handle_pipeline_execution(self, recipe: list):
         """Dispatches the recipe to the background worker."""
         if self.base_image is None:
             QMessageBox.warning(self, "No Image", "Please load an image first!")
+            return
+
+        # If the canvas is showing the hybrid page, trigger hybrid computation directly
+        if self.canvas.stack.currentWidget() == self.canvas.hybrid_page:
+            self.canvas._compute_and_display_hybrid()
             return
 
         # UX Enhancement: Lock the Process button to prevent spam-clicking

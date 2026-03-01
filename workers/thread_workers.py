@@ -1,7 +1,7 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 import numpy as np
 from core.operation_factory import build_operation
-from core.operations import MultiOutputOperation
+from core.operations import MultiOutputOperation, HybridImageOperation
 class ImageWorker(QThread):
     result_ready = pyqtSignal(dict)
     error_occurred = pyqtSignal(str)
@@ -29,6 +29,11 @@ class ImageWorker(QThread):
                     result_dict = operation_instance.apply_extended(current_image)
                     final_multi_buffer = result_dict
                     current_image = result_dict["magnitude"]
+                elif isinstance(operation_instance, HybridImageOperation):
+                    # Hybrid always operates on the ORIGINAL base image,
+                    # not on the result of earlier pipeline steps.
+                    current_image = operation_instance.apply(self.image.copy())
+                    final_multi_buffer = None
                 else:
                     current_image = operation_instance.apply(current_image)
                     final_multi_buffer = None

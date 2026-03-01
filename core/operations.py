@@ -252,4 +252,125 @@ class NormalizeImage(ImageOperation):
     def apply(self, image: np.ndarray) -> np.ndarray:
         # Stretches the pixel values to span the full 0-255 range
         return cv2.normalize(image, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    
+
+
+# ==========================================
+# 6) Color Conversion
+# ==========================================
+class ManualGrayscale(ImageOperation):
+    """
+    Converts a color (BGR) image to grayscale using the ITU-R BT.601 luma formula:
+
+        Gray = 0.299 * R + 0.587 * G + 0.114 * B
+
+    Why manual formula instead of cv2.cvtColor?
+        This implementation is required to demonstrate the mathematical basis of
+        luminance-weighted grayscale conversion. The weights reflect human visual
+        perception — green contributes most because the eye is most sensitive to it.
+
+    Why CDF matters for histogram equalization:
+        The CDF of the grayscale histogram acts as a mapping function: it remaps
+        each intensity level to a new value that spreads pixel frequencies uniformly
+        across the [0, 255] range, thereby improving contrast.
+    """
+
+    def apply(self, image: np.ndarray) -> np.ndarray:
+        """
+        Apply manual grayscale conversion.
+
+        Args:
+            image: Input image as a NumPy array (BGR 3-channel or 2D grayscale).
+
+        Returns:
+            2D uint8 grayscale image. Input is never mutated.
+        """
+        # Already grayscale — return a copy to guarantee no mutation
+        if image.ndim == 2:
+            return image.copy()
+
+        # Extract BGR channels (OpenCV convention: index 0=B, 1=G, 2=R)
+        b = image[:, :, 0].astype(np.float64)
+        g = image[:, :, 1].astype(np.float64)
+        r = image[:, :, 2].astype(np.float64)
+
+        # ITU-R BT.601 luma formula — fully vectorized, no pixel loops
+        gray = 0.299 * r + 0.587 * g + 0.114 * b
+
+        return gray.astype(np.uint8)
+
+
+# ==========================================
+# 7) Hybrid Images
+# ==========================================
+
+def compute_hybrid(img_a: np.ndarray, img_b: np.ndarray,
+                   sigma_low: float, sigma_high: float) -> np.ndarray:
+    """
+    Compute a hybrid image from two source images.
+
+    A hybrid image blends the low-frequency content of Image A with the
+    high-frequency detail of Image B.  The result is an optical illusion:
+    at close range, the viewer perceives Image B's sharp detail; at a
+    distance, only Image A's smooth structure is visible.
+
+    Why Gaussian subtraction for high-pass?
+        A Gaussian blur is a low-pass filter — it removes high frequencies.
+        Subtracting the blurred version from the original therefore isolates
+        the high-frequency content (edges, textures, fine detail).
+
+    Why normalization is necessary:
+        Summing the low and high components can produce values outside [0, 255].
+        cv2.normalize maps the full dynamic range back to displayable uint8,
+        preserving relative contrast without clipping artefacts.
+
+    Args:
+        img_a:      Image A (low-frequency source), BGR uint8 ndarray.
+        img_b:      Image B (high-frequency source), BGR uint8 ndarray.
+        sigma_low:  Gaussian σ for the low-pass on Image A.
+        sigma_high: Gaussian σ for the high-pass on Image B.
+
+    Returns:
+        Hybrid image as a uint8 ndarray with the same spatial dimensions
+        as Image A.  All values are in [0, 255].
+    """
+    # Work on copies — never mutate the caller's arrays
+    a = img_a.copy().astype(np.float32)
+
+    # Resize Image B to match Image A dimensions (height, width)
+    h, w = a.shape[:2]
+    b = cv2.resize(img_b, (w, h)).astype(np.float32)
+
+    # Ensure both images have the same channel count
+    if a.ndim == 2 and b.ndim == 3:
+        a = cv2.cvtColor(a.astype(np.uint8), cv2.COLOR_GRAY2BGR).astype(np.float32)
+    elif a.ndim == 3 and b.ndim == 2:
+        b = cv2.cvtColor(b.astype(np.uint8), cv2.COLOR_GRAY2BGR).astype(np.float32)
+
+    # Low-frequency component (from Image A)
+    low = cv2.GaussianBlur(a, (0, 0), sigma_low)
+
+    # High-frequency component (from Image B)
+    blurred_b = cv2.GaussianBlur(b, (0, 0), sigma_high)
+    high = b - blurred_b
+
+    # Combine and normalize to [0, 255]
+    hybrid = low + high
+    hybrid = cv2.normalize(hybrid, None, 0, 255, cv2.NORM_MINMAX)
+    return hybrid.astype(np.uint8)
+
+
+class HybridImageOperation(ImageOperation):
+    """Pipeline-compatible wrapper around compute_hybrid()."""
+
+    def __init__(self, sigma_low: float, sigma_high: float,
+                 second_image: np.ndarray = None):
+        self.sigma_low = sigma_low
+        self.sigma_high = sigma_high
+        self.second_image = second_image
+
+    def apply(self, image: np.ndarray) -> np.ndarray:
+        if self.second_image is None:
+            raise ValueError("HybridImageOperation requires a second image.")
+        return compute_hybrid(image, self.second_image,
+                              self.sigma_low, self.sigma_high)
+

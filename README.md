@@ -18,6 +18,6 @@ uv sync
 ### 3. Running the App
 
 ```bash
-uv run src/main.py
+uv run main.py
 
 ```
