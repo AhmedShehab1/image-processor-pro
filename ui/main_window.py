@@ -1,10 +1,13 @@
 import numpy as np
-from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QTabWidget
+)
 from PyQt6.QtCore import Qt
 
 from ui.sidebar_controls import SidebarControls
 from ui.canvas_view import CanvasView
 from ui.histogram_panel import HistogramPanel
+from ui.hybrid_mode import HybridModeWidget
 from workers.thread_workers import ImageWorker
 from config import AppConfig
 
@@ -21,7 +24,6 @@ class MainWindow(QMainWindow):
         self.last_action = None   # A string hint of the last operation performed (for undo/redo context)
         self.worker = None         # Holds the background QThread
 
-
         self.history_stack = []
         self.redo_stack = []
         self.MAX_HISTORY = AppConfig.MAX_HISTORY
@@ -32,55 +34,53 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+        root_layout = QVBoxLayout(central_widget)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
 
-        main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        # ---- Top-Level Tab Widget ----
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("main_tabs")
+        root_layout.addWidget(self.tabs)
 
-        # Instantiate the three main UI pillars
+        # --- Tab 1: Standard Mode ---
+        standard_tab = QWidget()
+        standard_layout = QHBoxLayout(standard_tab)
+        standard_layout.setContentsMargins(0, 0, 0, 0)
+        standard_layout.setSpacing(0)
+
         self.sidebar = SidebarControls()
         self.canvas = CanvasView()
         self.histogram = HistogramPanel()
 
-        # Build the Right Viewport (Canvas on top, Histogram on bottom)
+        # Right Viewport (Canvas + Histogram)
         right_viewport = QWidget()
         right_layout = QVBoxLayout(right_viewport)
         right_layout.setContentsMargins(10, 10, 10, 10)
         right_layout.addWidget(self.canvas, stretch=1)
         right_layout.addWidget(self.histogram)
 
-        main_layout.addWidget(self.sidebar)
-        main_layout.addWidget(right_viewport, stretch=1)
+        standard_layout.addWidget(self.sidebar)
+        standard_layout.addWidget(right_viewport, stretch=1)
+
+        self.tabs.addTab(standard_tab, "📐 Standard Mode")
+
+        # --- Tab 2: Hybrid Mode ---
+        self.hybrid_widget = HybridModeWidget()
+        self.tabs.addTab(self.hybrid_widget, "🔬 Hybrid Mode")
 
     def _connect_signals(self):
         # 1. Listen for the recipe from the Sidebar
         self.sidebar.process_requested.connect(self.handle_pipeline_execution)
-        
+
         # 2. Listen for a new image being loaded in the Canvas
         self.canvas.image_loaded.connect(self.on_image_loaded)
 
         self.canvas.undo_requested.connect(self.perform_undo)
         self.canvas.redo_requested.connect(self.perform_redo)
 
-        # 3. Hybrid images — sidebar loads Image B, canvas does real-time preview
-        self.sidebar.hybrid_image_loaded.connect(self.on_hybrid_image_loaded)
-        self.canvas.hybrid_result_ready.connect(self.on_hybrid_result)
-
-        # 4. Sidebar section switching — controls which canvas page is visible
-        self.sidebar.section_changed.connect(self.handle_section_change)
-
-    # --- Page Switching ---
-
-    def handle_section_change(self, section_title: str):
-        """
-        Route the canvas to the correct page when the user clicks
-        a different sidebar section.
-        """
-        if "Hybrid" in section_title:
-            self.canvas.show_hybrid_page()
-        else:
-            self.canvas.show_single_page()
-            self.canvas.clear_hybrid_state()
+        # 3. Hybrid mode → histogram updates
+        self.hybrid_widget.hybrid_computed.connect(self._on_hybrid_computed)
 
     # --- State Management ---
 
@@ -89,24 +89,15 @@ class MainWindow(QMainWindow):
         self.base_image = image.copy()
         self.current_image = image.copy()
         self.current_multi_buffer = None  # Clear any previous multi-buffer state
-        
+
         self.history_stack.clear()
         self.redo_stack.clear()
         self._update_undo_redo_buttons()
-        
+
         self.histogram.update_plots(self.current_image)
 
-    def on_hybrid_image_loaded(self, second_image: np.ndarray):
-        """Called when the sidebar loads a second image for hybrid mode."""
-        if self.base_image is None:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "No Image", "Please load a primary image first!")
-            return
-        self.canvas.display_hybrid(self.base_image, second_image)
-
-    def on_hybrid_result(self, result: np.ndarray):
-        """Called when the canvas updates the hybrid preview in real-time."""
-        self.current_image = result
+    def _on_hybrid_computed(self, result: np.ndarray):
+        """Called when the hybrid mode produces a new result."""
         self.histogram.update_plots(result)
 
     # --- Worker Thread Execution ---
@@ -115,11 +106,6 @@ class MainWindow(QMainWindow):
         """Dispatches the recipe to the background worker."""
         if self.base_image is None:
             QMessageBox.warning(self, "No Image", "Please load an image first!")
-            return
-
-        # If the canvas is showing the hybrid page, trigger hybrid computation directly
-        if self.canvas.stack.currentWidget() == self.canvas.hybrid_page:
-            self.canvas._compute_and_display_hybrid()
             return
 
         # UX Enhancement: Lock the Process button to prevent spam-clicking
@@ -146,7 +132,7 @@ class MainWindow(QMainWindow):
 
             if len(self.history_stack) > self.MAX_HISTORY:
                 self.history_stack.pop(0)
-            
+
             self.redo_stack.clear()  # Clear the redo stack on new action
 
         action = response.get("action", "Unknown")
@@ -154,23 +140,23 @@ class MainWindow(QMainWindow):
         self.last_action = action  # Store the last action for undo/redo context
 
         # --- Route by Data Structure, NOT by Magic Strings ---
-        
+
         # Scenario A: We received a multi-buffer dictionary
         if isinstance(data, dict):
 
             self.current_image = data["magnitude"] if "magnitude" in data else self.current_image
             self.current_multi_buffer = data
-        
+
         # Scenario B: We received a standard image array
         elif isinstance(data, np.ndarray):
             self.current_image = data
             self.current_multi_buffer = None
-            
+
         # Scenario C: Something went terribly wrong
         else:
             print(f"Error: Unrecognized data type {type(data)} from {action}")
 
-        
+
         self._render_current_state()
         self.sidebar.process_btn.setEnabled(True)
         self.sidebar.process_btn.setText("▶ Process Image")
@@ -180,40 +166,40 @@ class MainWindow(QMainWindow):
 
     def perform_undo(self):
         if not self.history_stack: return
-        
+
         # 1. Save CURRENT state to Redo stack
         self.redo_stack.append({
             "image": self.current_image.copy(),
             "multi_buffer": self.current_multi_buffer.copy() if self.current_multi_buffer is not None else None,
             "action": self.last_action
         })
-        
+
         # 2. Pop PREVIOUS state from History
         prev_state = self.history_stack.pop()
         self.current_image = prev_state["image"]
         self.current_multi_buffer = prev_state["multi_buffer"]
         self.last_action = prev_state["action"]
-        
+
         self._render_current_state()
 
     def perform_redo(self):
         if not self.redo_stack: return
-        
+
         # 1. Save CURRENT state to History stack
         self.history_stack.append({
             "image": self.current_image.copy(),
             "multi_buffer": self.current_multi_buffer,
             "action": self.last_action
         })
-        
+
         # 2. Pop NEXT state from Redo
         next_state = self.redo_stack.pop()
         self.current_image = next_state["image"]
         self.current_multi_buffer = next_state["multi_buffer"]
         self.last_action = next_state["action"]
-        
+
         self._render_current_state()
-    
+
     def _render_current_state(self):
         """Routes the current memory state to the correct Canvas view."""
         if self.current_multi_buffer is not None:
@@ -227,7 +213,7 @@ class MainWindow(QMainWindow):
                 )
         else:
             self.canvas.display_single_image(self.current_image)
-            
+
         self.histogram.update_plots(self.current_image)
         self._update_undo_redo_buttons()
 

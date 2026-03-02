@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QSlider, QComboBox, QLabel,
-    QRadioButton, QButtonGroup, QToolBox, QHBoxLayout, QFileDialog
+    QRadioButton, QButtonGroup, QToolBox, QHBoxLayout
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from core.config_models import (
@@ -12,8 +12,6 @@ from core.config_models import (
 
 class SidebarControls(QWidget):
     process_requested = pyqtSignal(list)  # Emits the full recipe (list of steps)
-    hybrid_image_loaded = pyqtSignal(np.ndarray)  # Emits the second image for hybrid
-    section_changed = pyqtSignal(str)  # Emits the section title when user switches
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -32,7 +30,6 @@ class SidebarControls(QWidget):
 
         # Main Accordion Widget
         self.toolbox = QToolBox()
-        self.toolbox.currentChanged.connect(self._on_section_changed)
         self.layout.addWidget(self.toolbox)
 
         # Build individual accordion sections
@@ -42,7 +39,6 @@ class SidebarControls(QWidget):
         self._build_frequency_section()
         self._build_enhancement_section()
         self._build_color_section()
-        self._build_hybrid_section()
 
         # Global Process Button
         self.process_btn = QPushButton("▶ Process Image")
@@ -50,11 +46,6 @@ class SidebarControls(QWidget):
         self.process_btn.setObjectName("process_btn")
         self.process_btn.clicked.connect(self._emit_process_signal)
         self.layout.addWidget(self.process_btn)
-
-    def _on_section_changed(self, index: int):
-        """Emit the section title so MainWindow can switch canvas pages."""
-        title = self.toolbox.itemText(index)
-        self.section_changed.emit(title)
 
     # --- 1. Noise Injection ---
     def _build_noise_section(self):
@@ -72,7 +63,6 @@ class SidebarControls(QWidget):
         self.noise_slider.setValue(25)
         lay.addWidget(self.noise_slider)
 
-        # Connect changes to update recipe
         self.noise_dropdown.currentIndexChanged.connect(self._update_noise_step)
         self.noise_slider.valueChanged.connect(self._update_noise_step)
 
@@ -100,7 +90,7 @@ class SidebarControls(QWidget):
 
         lay.addWidget(QLabel("Kernel Size (3, 5, 7):"))
         self.kernel_slider = QSlider(Qt.Orientation.Horizontal)
-        self.kernel_slider.setRange(1, 3)  # Maps to 3, 5, 7
+        self.kernel_slider.setRange(1, 3)
         self.kernel_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.kernel_slider.setTickInterval(1)
         self.kernel_slider.setValue(1)
@@ -109,7 +99,7 @@ class SidebarControls(QWidget):
 
         lay.addWidget(QLabel("Sigma (For Gaussian):"))
         self.sigma_slider = QSlider(Qt.Orientation.Horizontal)
-        self.sigma_slider.setRange(1, 50)  # Divide by 10 later for float
+        self.sigma_slider.setRange(1, 50)
         self.sigma_slider.setValue(12)
         self.sigma_slider.valueChanged.connect(self._update_spatial_step)
         lay.addWidget(self.sigma_slider)
@@ -141,7 +131,7 @@ class SidebarControls(QWidget):
         self.canny_widget = QWidget()
         canny_lay = QVBoxLayout(self.canny_widget)
         canny_lay.setContentsMargins(0,0,0,0)
-        
+
         canny_lay.addWidget(QLabel("Canny Min Threshold:"))
         self.canny_min = QSlider(Qt.Orientation.Horizontal)
         self.canny_min.setRange(0, 255)
@@ -168,7 +158,7 @@ class SidebarControls(QWidget):
 
     def _update_edge_step(self):
         operator = self.edge_group.checkedButton().text()
-        
+
         if operator == "Canny":
             self.pipeline_state["edge"] = EdgeConfig(
                 operator=operator,
@@ -218,10 +208,10 @@ class SidebarControls(QWidget):
         self.normalize_btn = QPushButton("Normalize Image")
         self.equalize_btn.clicked.connect(self._add_equalize_step)
         self.normalize_btn.clicked.connect(self._add_normalize_step)
-        
+
         lay.addWidget(self.equalize_btn)
         lay.addWidget(self.normalize_btn)
-        
+
         lay.addStretch()
         self.toolbox.addItem(widget, "5. Enhancements")
 
@@ -246,46 +236,8 @@ class SidebarControls(QWidget):
     def _add_gray_step(self):
         self.pipeline_state["color"] = ColorToGrayConfig(method="Manual")
 
-    # --- 7. Hybrid Images ---
-    def _build_hybrid_section(self):
-        """Sidebar only needs a Load button — sliders live in the Canvas."""
-        widget = QWidget()
-        lay = QVBoxLayout(widget)
-        lay.setSpacing(8)
-        lay.setContentsMargins(4, 4, 4, 4)
-
-        info_label = QLabel("Load a second image to enter\nhybrid mode. Sliders are on\nthe canvas.")
-        info_label.setStyleSheet("color: #888; font-style: italic;")
-        info_label.setWordWrap(True)
-        lay.addWidget(info_label)
-
-        self.hybrid_load_btn = QPushButton("📂 Load Second Image")
-        self.hybrid_load_btn.clicked.connect(self._load_second_image)
-        lay.addWidget(self.hybrid_load_btn)
-
-        self.hybrid_status_label = QLabel("No second image loaded")
-        self.hybrid_status_label.setStyleSheet("color: #888;")
-        self.hybrid_status_label.setWordWrap(True)
-        lay.addWidget(self.hybrid_status_label)
-
-        lay.addStretch()
-        self.toolbox.addItem(widget, "7. Hybrid Images")
-
-    def _load_second_image(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Load Second Image", "", "Images (*.png *.jpg *.jpeg *.bmp)"
-        )
-        if file_path:
-            img = cv2.imread(file_path, cv2.IMREAD_COLOR)
-            if img is not None:
-                filename = file_path.replace("\\", "/").split("/")[-1]
-                self.hybrid_status_label.setText(f"✔ {filename}")
-                self.hybrid_status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
-                self.hybrid_image_loaded.emit(img)
-
     # --- Communication Logic ---
     def _emit_process_signal(self):
-        # Only emit steps that are actually configured
         recipe = []
         processing_order = ["color", "enhancement", "noise", "spatial", "frequency", "edge"]
 

@@ -171,3 +171,33 @@ QLabel#canvas_placeholder {
     font-weight: 400;
     text-transform: none;
 }
+
+/* ========================================================
+   TOP-LEVEL TABS (QTabWidget)
+======================================================== */
+QTabWidget::pane {
+    border: none;
+    background-color: #18181B;
+}
+
+QTabBar::tab {
+    background-color: #27272A;
+    color: #A1A1AA;
+    padding: 10px 24px;
+    font-weight: 600;
+    font-size: 13px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    min-width: 140px;
+}
+
+QTabBar::tab:selected {
+    color: #38BDF8;
+    background-color: #18181B;
+    border-bottom: 2px solid #38BDF8;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #3F3F46;
+    color: #D1D5DB;
+}
