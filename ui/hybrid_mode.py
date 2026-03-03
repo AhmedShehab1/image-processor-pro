@@ -1,43 +1,20 @@
 """
-HybridModeWidget — Perceptual Hybrid Images (Oliva & Torralba, SIGGRAPH 2006).
+HybridModeWidget — Thin UI layer for Perceptual Hybrid Images.
 
-Architecture overview:
-    This widget implements TRUE frequency-domain hybrid images, not simple
-    alpha blending.  It owns its entire lifecycle: image loading, sigma
-    sliders, amplitude control, energy balancing, perceptual viewing
-    distance simulation, and undo/redo.
+All frequency-domain logic (Gaussian masks, FFT/IFFT, DC removal, energy
+balancing, adaptive sigma, blending) lives exclusively in
+core.operations.HybridImage.
 
-Why weighted frequency composition is required:
-    Naive  hybrid = low + high  produces blending artifacts because the
-    raw high-frequency component can overpower the low.  Weighting via
-    alpha * low + beta * high  lets us control the relative energy of
-    each band independently.  Combined with amplitude normalization of
-    the high component, this yields true frequency separation where
-    Image A dominates at far distance and Image B dominates up close.
-
-Why the high component is zero-centered and amplitude-normalized:
-    Subtracting GaussianBlur(B) from B yields values in ≈[−255, +255].
-    Normalizing by  high / std(high) * target_amplitude  controls the
-    perceptual strength of edges so they sit at a specified energy level
-    instead of an arbitrary one determined by image content.
-
-Why attenuation of high frequencies simulates viewing distance:
-    The human visual system acts as a spatial low-pass filter whose
-    cutoff depends on viewing distance.  Simply blurring the result is
-    insufficient — it also smears the low-frequency content.  The
-    correct simulation progressively REDUCES the high component's
-    contribution  (beta_distance = 1 − distance_ratio)  and only adds
-    mild blur for very large distances (> 40 %), preserving low-freq
-    clarity.
-
-Why energy balancing prevents the "blending look":
-    If  std(high) > 1.5 * std(low) , the high component will dominate
-    the result and it will look like a transparent overlay.  Clamping
-    the high energy to at most 1.5× the low energy forces the two
-    frequency bands to coexist rather than compete.
+This widget is responsible ONLY for:
+    - Loading images
+    - Instantiating HybridImage
+    - Calling public methods (apply / apply_extended)
+    - Caching returned components
+    - Viewing-distance simulation (reweighting cached float components)
+    - Displaying results
+    - Undo / redo
 """
 
-import cv2
 import numpy as np
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -47,11 +24,15 @@ from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from ui.clickable_image_label import ClickableImageLabel
+from core.operations import HybridImage
 
 
 class HybridModeWidget(QWidget):
     """
-    Top-level hybrid images workspace with true perceptual pipeline.
+    Top-level hybrid images workspace — pure grayscale pipeline.
+
+    Delegates frequency-domain extraction to HybridImage (core.operations)
+    and adds viewing distance simulation.
 
     Signals:
         hybrid_computed(np.ndarray): Emitted when a new hybrid_display is
@@ -59,9 +40,6 @@ class HybridModeWidget(QWidget):
     """
 
     hybrid_computed = pyqtSignal(np.ndarray)
-
-    # Default high-frequency target amplitude (Oliva & Torralba sweet spot)
-    _DEFAULT_TARGET_AMPLITUDE = 20.0
 
     # ------------------------------------------------------------------
     # Construction
@@ -71,12 +49,13 @@ class HybridModeWidget(QWidget):
         super().__init__(parent)
 
         # ---- State (persists across tab switches) ----
-        self.originalA = None          # uint8 — never mutated
-        self.originalB = None          # uint8 — resized to match A, never mutated
-        self.low_component = None      # float32 — GaussianBlur(A, σ_low)
-        self.high_component = None     # float32 — amplitude-normalized, zero-centered
-        self.hybrid_base = None        # float32 — alpha*low + beta*high (before distance)
+        self.originalA = None          # uint8 — as loaded (BGR or gray)
+        self.originalB = None          # uint8 — as loaded (BGR or gray)
         self.hybrid_display = None     # uint8 — after viewing-distance simulation
+
+        # Cached float64 components from HybridImage._pipeline()
+        self._cached_low = None        # float64 — LPF(A) after energy balancing
+        self._cached_high = None       # float64 — HPF(B) after energy balancing
 
         # ---- Undo / Redo ----
         self._undo_stack: list[dict] = []
@@ -98,7 +77,7 @@ class HybridModeWidget(QWidget):
         top_row = QHBoxLayout()
         top_row.setSpacing(16)
 
-        # -- Left panel: Image A + σ_low --
+        # -- Left panel: Image A --
         left = QVBoxLayout()
         left.setSpacing(4)
 
@@ -111,21 +90,9 @@ class HybridModeWidget(QWidget):
         self.label_a.image_loaded.connect(self._on_image_a_loaded)
         left.addWidget(self.label_a, stretch=1)
 
-        sigma_low_row = QHBoxLayout()
-        sigma_low_row.addWidget(QLabel("σ Low:"))
-        self.sigma_low_slider = QSlider(Qt.Orientation.Horizontal)
-        self.sigma_low_slider.setRange(1, 30)
-        self.sigma_low_slider.setValue(5)
-        self.sigma_low_slider.valueChanged.connect(self._update_low_preview)
-        sigma_low_row.addWidget(self.sigma_low_slider, stretch=1)
-        self.sigma_low_val = QLabel("5")
-        self.sigma_low_val.setStyleSheet("color: #00BCD4; font-weight: bold; min-width: 20px;")
-        sigma_low_row.addWidget(self.sigma_low_val)
-        left.addLayout(sigma_low_row)
-
         top_row.addLayout(left, stretch=1)
 
-        # -- Right panel: Image B + σ_high --
+        # -- Right panel: Image B --
         right = QVBoxLayout()
         right.setSpacing(4)
 
@@ -138,33 +105,16 @@ class HybridModeWidget(QWidget):
         self.label_b.image_loaded.connect(self._on_image_b_loaded)
         right.addWidget(self.label_b, stretch=1)
 
-        sigma_high_row = QHBoxLayout()
-        sigma_high_row.addWidget(QLabel("σ High:"))
-        self.sigma_high_slider = QSlider(Qt.Orientation.Horizontal)
-        self.sigma_high_slider.setRange(1, 30)
-        self.sigma_high_slider.setValue(5)
-        self.sigma_high_slider.valueChanged.connect(self._update_high_preview)
-        sigma_high_row.addWidget(self.sigma_high_slider, stretch=1)
-        self.sigma_high_val = QLabel("5")
-        self.sigma_high_val.setStyleSheet("color: #FF9800; font-weight: bold; min-width: 20px;")
-        sigma_high_row.addWidget(self.sigma_high_val)
-        right.addLayout(sigma_high_row)
-
         top_row.addLayout(right, stretch=1)
         root.addLayout(top_row, stretch=1)
 
-        # ---- High Strength slider ----
-        strength_row = QHBoxLayout()
-        strength_row.addWidget(QLabel("High Strength (β):"))
-        self.strength_slider = QSlider(Qt.Orientation.Horizontal)
-        self.strength_slider.setRange(5, 20)    # maps to 0.5 – 2.0
-        self.strength_slider.setValue(10)        # default 1.0
-        self.strength_slider.valueChanged.connect(self._on_strength_changed)
-        strength_row.addWidget(self.strength_slider, stretch=1)
-        self.strength_val = QLabel("1.0")
-        self.strength_val.setStyleSheet("color: #FF9800; font-weight: bold; min-width: 30px;")
-        strength_row.addWidget(self.strength_val)
-        root.addLayout(strength_row)
+        # ---- Sigma info label ----
+        self.sigma_info = QLabel("Adaptive σ: load both images and process")
+        self.sigma_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sigma_info.setStyleSheet(
+            "color: #9E9E9E; font-size: 11px; font-style: italic;"
+        )
+        root.addWidget(self.sigma_info)
 
         # ---- Process + Reset buttons ----
         btn_row = QHBoxLayout()
@@ -175,7 +125,7 @@ class HybridModeWidget(QWidget):
         self.process_btn.clicked.connect(self.process_hybrid)
         btn_row.addWidget(self.process_btn)
 
-        self.reset_btn = QPushButton("↺ Reset Perception")
+        self.reset_btn = QPushButton("↺ Reset")
         self.reset_btn.setMinimumHeight(38)
         self.reset_btn.clicked.connect(self._reset_perception)
         btn_row.addWidget(self.reset_btn)
@@ -232,15 +182,8 @@ class HybridModeWidget(QWidget):
     # Small UI helpers
     # ------------------------------------------------------------------
 
-    def _on_strength_changed(self):
-        beta = self.strength_slider.value() / 10.0
-        self.strength_val.setText(f"{beta:.1f}")
-
     def _reset_perception(self):
-        """Reset all sliders to defaults without clearing loaded images."""
-        self.sigma_low_slider.setValue(5)
-        self.sigma_high_slider.setValue(5)
-        self.strength_slider.setValue(10)
+        """Reset viewing distance slider."""
         self.distance_slider.setValue(0)
 
     # ------------------------------------------------------------------
@@ -248,95 +191,14 @@ class HybridModeWidget(QWidget):
     # ------------------------------------------------------------------
 
     def _on_image_a_loaded(self, img: np.ndarray):
-        """Store Image A and initialize the low component."""
+        """Store Image A and display it in its slot."""
         self.originalA = img.copy()
-        self.low_component = img.astype(np.float32)
-        # If B exists, resize it to match A
-        if self.originalB is not None:
-            h, w = self.originalA.shape[:2]
-            self.originalB = cv2.resize(self.originalB, (w, h))
-            self.label_b.set_image(self.originalB)
+        self.label_a.set_image(img)
 
     def _on_image_b_loaded(self, img: np.ndarray):
-        """Store Image B (resized to A if loaded) and initialize the high component."""
-        if self.originalA is not None:
-            h, w = self.originalA.shape[:2]
-            self.originalB = cv2.resize(img, (w, h))
-        else:
-            self.originalB = img.copy()
-        self.label_b.set_image(self.originalB)
-        # Initial high component
-        self._recompute_high()
-
-    # ------------------------------------------------------------------
-    # Preview Logic (sliders → individual previews only)
-    # ------------------------------------------------------------------
-
-    def _update_low_preview(self):
-        """
-        σ_low slider → updates ONLY Image A preview.
-
-        Computes the Gaussian-blurred version of originalA and stores it
-        as the low_component for later perceptual blending.
-        """
-        if self.originalA is None:
-            return
-        sigma = self.sigma_low_slider.value()
-        self.sigma_low_val.setText(str(sigma))
-
-        self.low_component = cv2.GaussianBlur(
-            self.originalA.astype(np.float32), (0, 0), sigma
-        )
-        display = np.clip(self.low_component, 0, 255).astype(np.uint8)
-        self.label_a.set_image(display)
-
-    def _update_high_preview(self):
-        """
-        σ_high slider → updates ONLY Image B preview.
-
-        Extracts the high-frequency component via Laplacian-of-Gaussian
-        style subtraction, then normalizes its amplitude to a fixed
-        target energy level so it cannot overpower the low component.
-
-        The preview is shifted by +128 so zero-crossings appear as
-        mid-gray, making both positive and negative edges visible.
-        """
-        if self.originalB is None:
-            return
-        sigma = self.sigma_high_slider.value()
-        self.sigma_high_val.setText(str(sigma))
-
-        self._recompute_high()
-
-        # +128 shift for visualization only
-        vis = self.high_component + 128.0
-        vis = cv2.normalize(vis, None, 0, 255, cv2.NORM_MINMAX)
-        self.label_b.set_image(vis.astype(np.uint8))
-
-    def _recompute_high(self):
-        """
-        Extract and amplitude-normalize the high-frequency component.
-
-        Why amplitude normalization?
-            Raw  B − blur(B)  has energy proportional to image content.
-            An image with sharp edges produces much larger raw values
-            than a soft portrait.  Normalizing to a target amplitude
-            (default 20) ensures consistent perceptual strength
-            regardless of source image characteristics.
-        """
-        if self.originalB is None:
-            return
-        sigma = self.sigma_high_slider.value()
-        b_float = self.originalB.astype(np.float32)
-        blurred = cv2.GaussianBlur(b_float, (0, 0), sigma)
-        raw_high = b_float - blurred
-
-        # Amplitude normalization
-        std = np.std(raw_high)
-        if std > 1e-6:
-            self.high_component = (raw_high / std) * self._DEFAULT_TARGET_AMPLITUDE
-        else:
-            self.high_component = raw_high
+        """Store Image B and display it in its slot."""
+        self.originalB = img.copy()
+        self.label_b.set_image(img)
 
     # ------------------------------------------------------------------
     # Hybrid Computation (Process button only)
@@ -344,42 +206,39 @@ class HybridModeWidget(QWidget):
 
     def process_hybrid(self):
         """
-        Compute the perceptual hybrid image.
-
-        Pipeline:
-            1. Energy balance: scale high energy to match low energy.
-            2. Store balanced components for distance simulation.
-            3. Apply viewing-distance simulation.
-
-        This is called ONLY when the user clicks Process.  The current
-        state is pushed to the undo stack before computing.
+        Compute the hybrid image by delegating entirely to HybridImage.
+        All frequency-domain processing happens inside apply_extended().
         """
-        if self.low_component is None or self.high_component is None:
+        if self.originalA is None or self.originalB is None:
             return
 
         self._push_undo()
 
-        # ---- Energy balancing ----
-        # Scale the high component so its energy matches the low.
-        # This prevents the hybrid from looking like a transparent
-        # overlay where one frequency band dominates the other.
-        self._balanced_low = self.low_component.astype(np.float32)
-        self._balanced_high = self.high_component.astype(np.float32).copy()
+        # Instantiate and run via public API only
+        op = HybridImage(
+            image_high=self.originalB,
+            alpha=1.0,
+            beta=1.0,
+            grayscale_preview=True,
+        )
+        results = op.apply_extended(self.originalA)
 
-        low_energy = np.std(self._balanced_low)
-        high_energy = np.std(self._balanced_high)
-        if high_energy > 1e-6:
-            self._balanced_high *= (low_energy / high_energy)
+        # Cache float64 intermediates for viewing-distance reweighting
+        self._cached_low = op.cache_low
+        self._cached_high = op.cache_high
 
-        # Store hybrid_base for undo/redo reference
-        beta = self.strength_slider.value() / 10.0
-        self.hybrid_base = self._balanced_low + beta * self._balanced_high
+        # Show effective adaptive sigmas returned by HybridImage
+        sigmas = results["effective_sigmas"]
+        self.sigma_info.setText(
+            f"Adaptive σ:  LP = {sigmas['lp']:.1f}   |   "
+            f"HP = {sigmas['hp']:.1f}"
+        )
 
         # Apply current viewing distance
         self._apply_distance()
 
     # ------------------------------------------------------------------
-    # True Perceptual Viewing Distance Simulation
+    # Perceptual Viewing Distance Simulation
     # ------------------------------------------------------------------
 
     def _simulate_viewing_distance(self):
@@ -387,10 +246,8 @@ class HybridModeWidget(QWidget):
         Slider changed → recompute hybrid_display.
 
         Viewing distance is simulated by attenuating high-frequency
-        energy rather than globally blurring the hybrid image.  This
-        better matches human perception: the eye's spatial low-pass
-        filter suppresses fine detail at distance while preserving
-        the low-frequency structure with full clarity.
+        energy:  high_attenuation = (1 - distance_ratio)^2
+        The low component is NEVER modified.
         """
         d = self.distance_slider.value()
         self.distance_val.setText(str(d))
@@ -398,54 +255,40 @@ class HybridModeWidget(QWidget):
 
     def _apply_distance(self):
         """
-        Reconstruct hybrid_display by attenuating ONLY the high-frequency
-        component.  The low component is NEVER blurred.
+        Reconstruct hybrid_display by scaling ONLY the cached high-frequency
+        component.  The low-frequency component is NEVER modified.
 
         At distance 0   → high_attenuation = 1.0 (full detail)
         At distance 100 → high_attenuation = 0.0 (pure low-freq image)
-
-        Optional: for distance > 40%, apply mild Gaussian blur to the
-        high component only (NOT to low or the full composite) to
-        simulate additional perceptual roll-off of fine edges.
         """
-        if not hasattr(self, '_balanced_low') or self._balanced_low is None:
+        if self._cached_low is None or self._cached_high is None:
             return
 
         d = self.distance_slider.value()
         distance_ratio = d / 100.0
 
-        # ---- High-frequency attenuation ----
-        high_attenuation = 1.0 - distance_ratio
-        beta = self.strength_slider.value() / 10.0
+        # Quadratic attenuation — only scales the high component
+        high_attenuation = (1.0 - distance_ratio) ** 2
 
-        high = self._balanced_high.copy()
-
-        # Optional: mild blur on HIGH ONLY for far distances (> 40%)
-        if distance_ratio > 0.4:
-            extra_sigma = (distance_ratio - 0.4) * 10.0
-            high = cv2.GaussianBlur(high, (0, 0), extra_sigma)
-
-        # Compose: low is NEVER blurred, preserving its clarity
-        display = self._balanced_low + high_attenuation * beta * high
-
-        # Clip to valid range (NOT cv2.normalize, which stretches contrast)
-        display = np.clip(display, 0, 255)
-        self.hybrid_display = display.astype(np.uint8)
+        # Reweight cached float components; clip to valid uint8 range
+        display = self._cached_low + high_attenuation * self._cached_high
+        self.hybrid_display = np.clip(display, 0, 255).astype(np.uint8)
 
         self._display_result(self.hybrid_display)
         self.hybrid_computed.emit(self.hybrid_display)
 
     def _display_result(self, cv_img: np.ndarray):
-        """Convert an OpenCV image and display it in the result label."""
+        """Convert a grayscale image to QPixmap and display it."""
         if cv_img is None:
             return
         if len(cv_img.shape) == 2:
             h, w = cv_img.shape
-            q_img = QImage(cv_img.data, w, h, w, QImage.Format.Format_Grayscale8)
+            img = np.ascontiguousarray(cv_img)
+            q_img = QImage(img.tobytes(), w, h, w, QImage.Format.Format_Grayscale8)
         else:
             h, w, ch = cv_img.shape
-            rgb = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-            q_img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
+            rgb = np.ascontiguousarray(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB))
+            q_img = QImage(rgb.tobytes(), w, h, ch * w, QImage.Format.Format_RGB888)
 
         pixmap = QPixmap.fromImage(q_img)
         scaled = pixmap.scaled(
@@ -461,22 +304,33 @@ class HybridModeWidget(QWidget):
     def _snapshot(self) -> dict:
         """Capture the current hybrid state for undo/redo."""
         return {
-            "sigma_low": self.sigma_low_slider.value(),
-            "sigma_high": self.sigma_high_slider.value(),
-            "strength": self.strength_slider.value(),
             "distance": self.distance_slider.value(),
-            "hybrid_base": self.hybrid_base.copy() if self.hybrid_base is not None else None,
+            "cached_low": self._cached_low.copy() if self._cached_low is not None else None,
+            "cached_high": self._cached_high.copy() if self._cached_high is not None else None,
+            "hybrid_display": self.hybrid_display.copy() if self.hybrid_display is not None else None,
         }
 
     def _restore(self, snap: dict):
         """Restore a previously captured state."""
-        self.sigma_low_slider.setValue(snap["sigma_low"])
-        self.sigma_high_slider.setValue(snap["sigma_high"])
-        self.strength_slider.setValue(snap["strength"])
+        # Block signals to prevent _simulate_viewing_distance from firing
+        # with stale cached data while we're mid-restore
+        self.distance_slider.blockSignals(True)
         self.distance_slider.setValue(snap["distance"])
-        self.hybrid_base = snap["hybrid_base"]
-        if self.hybrid_base is not None:
+        self.distance_val.setText(str(snap["distance"]))
+        self.distance_slider.blockSignals(False)
+
+        self._cached_low = snap["cached_low"]
+        self._cached_high = snap["cached_high"]
+        self.hybrid_display = snap["hybrid_display"]
+
+        if self._cached_low is not None:
             self._apply_distance()
+        else:
+            # Undone to pre-process state — clear the result display
+            self.label_result.clear()
+            self.label_result.setText("Process to generate hybrid")
+            self.hybrid_display = None
+
         self._update_undo_buttons()
 
     def _push_undo(self):

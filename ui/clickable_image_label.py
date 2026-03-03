@@ -63,11 +63,12 @@ class ClickableImageLabel(QLabel):
 
         if len(cv_img.shape) == 2:
             h, w = cv_img.shape
-            q_img = QImage(cv_img.data, w, h, w, QImage.Format.Format_Grayscale8)
+            img = np.ascontiguousarray(cv_img)
+            q_img = QImage(img.tobytes(), w, h, w, QImage.Format.Format_Grayscale8)
         else:
             h, w, ch = cv_img.shape
-            rgb = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-            q_img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
+            rgb = np.ascontiguousarray(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB))
+            q_img = QImage(rgb.tobytes(), w, h, ch * w, QImage.Format.Format_RGB888)
 
         pixmap = QPixmap.fromImage(q_img)
         scaled = pixmap.scaled(
